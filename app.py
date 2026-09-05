@@ -40,6 +40,7 @@ except Exception as e:
     st.error(f"שגיאה בהתחברות ל-Google Sheets: {e}")
     st.stop()
 
+# טעינת היסטוריה ברמת משפחה (family_key)
 def load_history():
     try:
         hist_sheet = sh.worksheet("history")
@@ -48,6 +49,7 @@ def load_history():
     except:
         return {fam: 0 for fam in FAMILIES_DB.keys()}
 
+# שמירת היסטוריה ברמת משפחה (family_key)
 def save_history(history_data):
     try:
         try:
@@ -60,7 +62,7 @@ def save_history(history_data):
         hist_sheet.append_row(["family_key", "count"])
         for fam, count in history_data.items():
             hist_sheet.append_row([fam, count])
-        st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ב-Google Sheets!")
+        st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ב-Google Sheets ברמת המשפחה!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
 
@@ -118,9 +120,21 @@ with tab1:
                         with col_b:
                             waits[f_key] = st.checkbox("ממתין/ה", value=True, key=f"{day}_{f_key}_wait")
                 with c2:
-                    # ברירת המחדל עכשיו ריקה ([] במקום רשימת כל המשפחות)
-                    avail_morn = st.multiselect("🙋‍♂️ מתנדבים לבוקר", list(FAMILIES_DB.keys()), default=[], key=f"{day}_morn")
-                    avail_aft = st.multiselect("🙋‍♂️ מתנדבים לאחה\"צ", list(FAMILIES_DB.keys()), default=[], key=f"{day}_aft")
+                    # תצוגת שם הנהג הספציפי, כשמאחורי הקלעים המפתח הוא family_key
+                    avail_morn = st.multiselect(
+                        "🙋‍♂️ מתנדבים לבוקר", 
+                        list(FAMILIES_DB.keys()), 
+                        default=[], 
+                        format_func=lambda x: f"{FAMILIES_DB[x]['parent_name']} (משפחת {x})",
+                        key=f"{day}_morn"
+                    )
+                    avail_aft = st.multiselect(
+                        "🙋‍♂️ מתנדבים לאחה\"צ", 
+                        list(FAMILIES_DB.keys()), 
+                        default=[], 
+                        format_func=lambda x: f"{FAMILIES_DB[x]['parent_name']} (משפחת {x})",
+                        key=f"{day}_aft"
+                    )
                 
                 absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], key=f"{day}_absent")
                 absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
@@ -140,7 +154,7 @@ with tab1:
                 results.append({"יום": day, "is_holiday": True})
                 continue
 
-            # בחירת נהג בוקר מתוך המתנדבים לפי מדד העומס
+            # בחירת משפחה מתוך המתנדבים לפי מדד העומס המשפחתי
             m_candidates = sorted(data["avail_morn"], key=lambda x: history.get(x, 0))
             m_driver = m_candidates[0] if m_candidates else None
             
@@ -154,7 +168,7 @@ with tab1:
             # חישוב שעת איסוף אחה"צ
             optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
             
-            # בחירת נהג אחה"צ מתוך המתנדבים הפנויים בשעה הנדרשת
+            # בחירת משפחה לאחה"צ לפי העומס המשפחתי
             a_candidates = [
                 k for k in data["avail_aft"] 
                 if data["end_times"][k].strftime("%H:%M") == optimal_time or 
@@ -171,9 +185,9 @@ with tab1:
             results.append({
                 "יום": day, 
                 "is_holiday": False, 
-                "m_driver_key": m_driver,
+                "m_family_key": m_driver,
                 "נהג בוקר": m_driver_str, 
-                "a_driver_key": a_driver,
+                "a_family_key": a_driver,
                 "נהג אחה\"צ": a_driver_str,
                 "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
                 "מסלול": gmaps_link, 
@@ -197,65 +211,69 @@ with tab1:
                 c_morn, c_aft = st.columns(2)
                 
                 with c_morn:
-                    st.write(f"🌅 **בוקר:** {res['נהג בוקר']}")
-                    if res["m_driver_key"]:
+                    st.write(f"🌅 **נהג מסיע בבוקר:** {res['נהג בוקר']}")
+                    if res["m_family_key"]:
                         status_m = st.selectbox(
-                            f"אישור נהג בוקר ({day}):", 
+                            f"אישור נסיעת בוקר ({day}):", 
                             status_options, 
                             key=f"status_m_{day}"
                         )
                         confirmations[(day, "morn")] = {
-                            "driver_key": res["m_driver_key"], 
+                            "family_key": res["m_family_key"], 
                             "status": status_m
                         }
                     if res['מסלול'] != "#":
                         st.markdown(f"[🗺️ ניווט ב-Google Maps]({res['מסלול']})")
                 
                 with c_aft:
-                    st.write(f"🌆 **אחה\"צ ({res['איסוף אחה\"צ']}):** {res['נהג אחה\"צ']}")
-                    if res["a_driver_key"]:
+                    st.write(f"🌆 **נהג מסיע אחה\"צ ({res['איסוף אחה\"צ']}):** {res['נהג אחה\"צ']}")
+                    if res["a_family_key"]:
                         status_a = st.selectbox(
-                            f"אישור נהג אחה\"צ ({day}):", 
+                            f"אישור נסיעת אחה\"צ ({day}):", 
                             status_options, 
                             key=f"status_a_{day}"
                         )
                         confirmations[(day, "aft")] = {
-                            "driver_key": res["a_driver_key"], 
+                            "family_key": res["a_family_key"], 
                             "status": status_a
                         }
 
             st.markdown("---")
             
-        if st.button("💾 עדכון היסטוריה ב-Google Sheets (רק עבור נסיעות שאושרו)"):
+        if st.button("💾 עדכון היסטוריה ב-Google Sheets (קרדיט נרשם למשפחה)"):
             history = load_history()
             updated_counts = history.copy()
             approved_count = 0
             
             for (d, shift), info in confirmations.items():
-                if info["status"] == "✅ מאושר" and info["driver_key"]:
-                    driver = info["driver_key"]
-                    updated_counts[driver] = updated_counts.get(driver, 0) + 1
+                if info["status"] == "✅ מאושר" and info["family_key"]:
+                    fam = info["family_key"]
+                    updated_counts[fam] = updated_counts.get(fam, 0) + 1
                     approved_count += 1
             
             save_history(updated_counts)
-            st.info(f"עודכנו {approved_count} נסיעות שאושרו בפועל!")
+            st.info(f"עודכנו {approved_count} נסיעות שאושרו בפועל ברמת המשפחה!")
 
 with tab2:
     st.header("🔄 בקשת החלפה בנסיעה")
     swap_day = st.selectbox("בחר יום להחלפה:", DAYS)
     swap_type = st.radio("סוג הנסיעה:", ["בוקר", "אחה\"צ"])
-    current_driver = st.selectbox("הנהג המשובץ כרגע:", list(FAMILIES_DB.keys()))
+    current_driver = st.selectbox(
+        "הנהג המשובץ כרגע:", 
+        list(FAMILIES_DB.keys()),
+        format_func=lambda x: f"{FAMILIES_DB[x]['parent_name']} (משפחת {x})"
+    )
     
     if st.button("🔍 מצא מחליף מומלץ"):
         history = load_history()
         candidates = [k for k in FAMILIES_DB.keys() if k != current_driver]
         recommended = sorted(candidates, key=lambda x: history.get(x, 0))[0]
-        st.info(f"💡 המחליף המומלץ ביותר (לפי מדד עומס): **{FAMILIES_DB[recommended]['parent_name']} ({recommended})**")
+        st.info(f"💡 המשפחה המחליפה המומלצת ביותר (לפי מדד עומס): **{FAMILIES_DB[recommended]['parent_name']} (משפחת {recommended})**")
 
 with tab3:
-    st.header("📊 סטטיסטיקת נסיעות מצטברת")
+    st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
     history_data = load_history()
-    df_hist = pd.DataFrame([{"משפחה": FAMILIES_DB[k]["parent_name"], "סך נסיעות": v} for k, v in history_data.items()])
+    df_hist = pd.DataFrame([{"משפחה": f"{FAMILIES_DB[k]['parent_name']} ({k})", "סך נסיעות": v} for k, v in history_data.items()])
     
     st.bar_chart(df_hist.set_index("משפחה"))
     st.table(df_hist)
