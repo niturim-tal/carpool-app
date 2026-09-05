@@ -167,7 +167,6 @@ with tab1:
             if not is_holiday:
                 c1, c2 = st.columns(2)
                 
-                # קריאת נתונים קיימים
                 saved_morn_driver = day_state.get("morn_driver")
                 if not saved_morn_driver:
                     m_idxs = day_state.get("avail_morn_idx", [])
@@ -189,7 +188,7 @@ with tab1:
                     selected_morn_driver = st.selectbox("🌅 נהג/ת לבוקר:", DRIVERS_LIST, index=morn_idx, key=f"{day}_morn")
                     
                     aft_idx = DRIVERS_LIST.index(saved_aft_driver) if saved_aft_driver in DRIVERS_LIST else 0
-                    selected_aft_driver = st.selectbox("                    selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
+                    selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
 
                 with c2:
                     saved_absent = day_state.get("absent", [])
