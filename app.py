@@ -9,13 +9,11 @@ import json
 
 st.set_page_config(page_title="ניהול הסעות בית אריה - בן שמן", layout="wide")
 
-@st.cache_resource
 def get_gspread_client():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
         scopes=scope
@@ -35,7 +33,6 @@ try:
     for row in records:
         f_key = str(row["family_key"])
         parents_str = str(row["parent_name"])
-        
         parents = [p.strip() for p in parents_str.replace('/', ',').replace(' ו-', ',').replace(' ו', ',').split(',')]
         
         FAMILIES_DB[f_key] = {
@@ -74,13 +71,12 @@ def save_history(history_data):
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
 
-# ניהול שמירת וטעינת הנתונים השבועיים בענן
 def load_weekly_state():
     try:
         ws = sh.worksheet("weekly_state")
-        records = ws.get_all_records()
-        if records:
-            return json.loads(records[0]["data_json"])
+        val = ws.acell('B2').value
+        if val:
+            return json.loads(val)
     except Exception as e:
         pass
     return {}
@@ -93,12 +89,11 @@ def save_weekly_state(state_data):
             ws = sh.add_worksheet(title="weekly_state", rows="10", cols="2")
             
         json_str = json.dumps(state_data, ensure_ascii=False)
-        rows = [
-            ["week_id", "data_json"],
-            ["current", json_str]
-        ]
-        ws.update(range_name='A1:B2', values=rows)
-        st.cache_data.clear()
+        ws.update_acell('A1', 'week_id')
+        ws.update_acell('B1', 'data_json')
+        ws.update_acell('A2', 'current')
+        ws.update_acell('B2', json_str)
+        
         st.success("הזמינות השבועית נשמרה בהצלחה ב-Google Sheets!")
     except Exception as e:
         st.error(f"שגיאה מפורטת בסנכרון הנתונים: {str(e)}")
@@ -145,7 +140,6 @@ with tab1:
         st.write("")
         st.write("")
         if st.button("🔄 רענן נתונים מהענן"):
-            st.cache_data.clear()
             st.rerun()
 
     saved_state = load_weekly_state()
@@ -199,8 +193,6 @@ with tab1:
                     "waits": waits, 
                     "avail_morn_idx": avail_morn_idx, 
                     "avail_aft_idx": avail_aft_idx, 
-                    "avail_morn_drivers": [DRIVERS_LIST[i] for i in avail_morn_idx], 
-                    "avail_aft_drivers": [DRIVERS_LIST[i] for i in avail_aft_idx], 
                     "absent": absent,
                     "absent_fams": absent_fams
                 }
@@ -208,7 +200,23 @@ with tab1:
                 schedule_data[day] = {"is_holiday": True}
 
     if st.button("💾 שמור זמינות בענן וחשב שיבוץ"):
-        save_weekly_state(schedule_data)
+        # הכנה נקייה לשמירה
+        clean_save = {}
+        for day, data in schedule_data.items():
+            if data.get("is_holiday"):
+                clean_save[day] = {"is_holiday": True}
+            else:
+                clean_save[day] = {
+                    "is_holiday": False,
+                    "end_times": data["end_times"],
+                    "waits": data["waits"],
+                    "avail_morn_idx": data["avail_morn_idx"],
+                    "avail_aft_idx": data["avail_aft_idx"],
+                    "absent": data["absent"]
+                }
+                
+        save_weekly_state(clean_save)
+        
         history = load_history()
         results = []
 
@@ -219,7 +227,8 @@ with tab1:
                 results.append({"יום": day, "is_holiday": True})
                 continue
 
-            m_candidates = sorted(data["avail_morn_drivers"], key=lambda d: history.get(d["family_key"], 0))
+            morn_drivers = [DRIVERS_LIST[i] for i in data["avail_morn_idx"]]
+            m_candidates = sorted(morn_drivers, key=lambda d: history.get(d["family_key"], 0))
             m_driver_obj = m_candidates[0] if m_candidates else None
             
             if m_driver_obj:
@@ -233,8 +242,9 @@ with tab1:
 
             optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
             
+            aft_drivers = [DRIVERS_LIST[i] for i in data["avail_aft_idx"]]
             a_candidates = [
-                d for d in data["avail_aft_drivers"] 
+                d for d in aft_drivers 
                 if data["end_times"][d["family_key"]] == optimal_time or 
                 (data["end_times"][d["family_key"]] < optimal_time and data["waits"][d["family_key"]])
             ]
