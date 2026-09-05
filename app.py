@@ -16,7 +16,6 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # טעינת המילון הישירה מה-Secrets (TOML)
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
         scopes=scope
@@ -25,11 +24,9 @@ def get_gspread_client():
 
 try:
     gc = get_gspread_client()
-    # שם הגיליון כפי שמופיע אצלך ב-Google Drive
     sh = gc.open("carpool_app") 
     worksheet = sh.sheet1
     
-    # טעינת נתוני המשפחות מהגיליון
     records = worksheet.get_all_records()
     FAMILIES_DB = {
         str(row["family_key"]): {
@@ -43,7 +40,6 @@ except Exception as e:
     st.error(f"שגיאה בהתחברות ל-Google Sheets: {e}")
     st.stop()
 
-# טעינת היסטוריה מתוך לשונית שניה בגיליון (אם קיימת)
 def load_history():
     try:
         hist_sheet = sh.worksheet("history")
@@ -77,6 +73,32 @@ def create_gmaps_link(origin, waypoints, destination):
     if waypoints:
         params["waypoints"] = "|".join(waypoints)
     return base_url + "&" + urllib.parse.urlencode(params)
+
+def calculate_optimal_pickup_time(end_times, waits_dict):
+    """
+    מחשב את שעת האיסוף האידאלית לפי הכללים:
+    - כל הילדים / 3 ילדים מסיימים יחד -> שעת הסיום שלהם.
+    - פיצול של 2 ו-2 -> השעה המאוחרת יותר.
+    - כל מקרה אחר -> שעת הרוב או השעה המאוחרת.
+    """
+    times_list = [t.strftime("%H:%M") for t in end_times.values()]
+    counts = Counter(times_list)
+    most_common = counts.most_common()
+    
+    # מקרה 1: כולם או 3 מסיימים באותה שעה
+    if most_common[0][1] >= 3:
+        return most_common[0][0]
+    
+    # מקרה 2: פיצול של 2 ו-2 (שני זוגות)
+    if len(most_common) >= 2 and most_common[0][1] == 2 and most_common[1][1] == 2:
+        return max(most_common[0][0], most_common[1][0])
+    
+    # מקרה 3: אם יש זוג יחיד ו-2 בודדים (2, 1, 1)
+    if most_common[0][1] == 2:
+        return most_common[0][0]
+        
+    # מקרה 4: כל ילד מסיים בשעה שונה -> השעה המאוחרת ביותר
+    return max(times_list)
 
 # חישוב תאריך יום ראשון הקרוב
 today = datetime.now()
@@ -131,6 +153,7 @@ with tab1:
                 results.append({"יום": day, "is_holiday": True})
                 continue
 
+            # שיבוץ נהג בוקר
             m_candidates = sorted(data["avail_morn"], key=lambda x: temp_counts.get(x, 0))
             m_driver = m_candidates[0] if m_candidates else None
             
@@ -142,9 +165,15 @@ with tab1:
             else:
                 m_driver_str, gmaps_link = "אין נהג פנוי!", "#"
 
-            times_list = [t.strftime("%H:%M") for t in data["end_times"].values()]
-            common_time = Counter(times_list).most_common(1)[0][0]
-            a_candidates = [k for k in data["avail_aft"] if data["end_times"][k].strftime("%H:%M") == common_time or (data["end_times"][k].strftime("%H:%M") < common_time and data["waits"][k])]
+            # חישוב שעת איסוף אחה"צ לפי הלוגיקה החדשה
+            optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
+            
+            # מציאת נהגים פנויים בשעת האיסוף שנבחרה
+            a_candidates = [
+                k for k in data["avail_aft"] 
+                if data["end_times"][k].strftime("%H:%M") == optimal_time or 
+                (data["end_times"][k].strftime("%H:%M") < optimal_time and data["waits"][k])
+            ]
             a_candidates = sorted(a_candidates, key=lambda x: temp_counts.get(x, 0))
             a_driver = a_candidates[0] if a_candidates else None
             
@@ -154,7 +183,15 @@ with tab1:
             else:
                 a_driver_str = "נדרש תיאום ידני"
 
-            results.append({"יום": day, "is_holiday": False, "נהג בוקר": m_driver_str, "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), "מסלול": gmaps_link, "איסוף אחה\"צ": common_time, "נהג אחה\"צ": a_driver_str})
+            results.append({
+                "יום": day, 
+                "is_holiday": False, 
+                "נהג בוקר": m_driver_str, 
+                "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
+                "מסלול": gmaps_link, 
+                "איסוף אחה\"צ": optimal_time, 
+                "נהג אחה\"צ": a_driver_str
+            })
 
         st.session_state["current_schedule"] = results
         st.session_state["temp_counts"] = temp_counts
