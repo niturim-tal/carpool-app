@@ -142,7 +142,7 @@ default_week_str = next_sunday.strftime("%d/%m/%Y")
 
 st.title("🚗 ניהול הסעות - בית אריה לבן שמן")
 
-tab1, tab2, tab3 = st.tabs(["🗓️ השבוע שלי", "🔄 החלפות", "📊 סטטיסטיקה"])
+tab1, tab2 = st.tabs(["🗓️ השבוע שלי", "📊 סטטיסטיקה"])
 
 saved_state = load_weekly_state()
 history = load_history()
@@ -167,11 +167,10 @@ with tab1:
             if not is_holiday:
                 c1, c2 = st.columns(2)
                 
-                # תמיכה לאחור בקריאת נתונים מהגוגל שיטס (בין אם המבנה ישן או חדש)
+                # קריאת נתונים קיימים
                 saved_morn_driver = day_state.get("morn_driver")
                 if not saved_morn_driver:
                     m_idxs = day_state.get("avail_morn_idx", [])
-                    # DRIVERS_LIST מכיל בעמדה 0 את 'ללא נהג', לכן המובילים הישנים מוזזים ב-1
                     if m_idxs and (m_idxs[0] + 1) < len(DRIVERS_LIST):
                         saved_morn_driver = DRIVERS_LIST[m_idxs[0] + 1]
                     else:
@@ -190,7 +189,7 @@ with tab1:
                     selected_morn_driver = st.selectbox("🌅 נהג/ת לבוקר:", DRIVERS_LIST, index=morn_idx, key=f"{day}_morn")
                     
                     aft_idx = DRIVERS_LIST.index(saved_aft_driver) if saved_aft_driver in DRIVERS_LIST else 0
-                    selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
+                    selected_aft_driver = st.selectbox("                    selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
 
                 with c2:
                     saved_absent = day_state.get("absent", [])
@@ -267,18 +266,6 @@ with tab1:
             st.error("❌ " + msg)
 
 with tab2:
-    st.header("🔄 בקשת החלפה בנסיעה")
-    swap_day = st.selectbox("בחר יום להחלפה:", DAYS)
-    swap_type = st.radio("סוג הנסיעה:", ["בוקר", "אחה\"צ"])
-    current_driver = st.selectbox("הנהג המשובץ כרגע:", DRIVERS_LIST[1:])
-    
-    if st.button("🔍 מצא מחליף מומלץ"):
-        current_fam = get_family_key_from_driver_str(current_driver)
-        candidates = [k for k in FAMILIES_DB.keys() if k != current_fam]
-        recommended = sorted(candidates, key=lambda x: history.get(x, 0))[0]
-        st.info(f"💡 המשפחה המחליפה המומלצת ביותר (לפי מדד עומס): **{FAMILIES_DB[recommended]['parents'][0]} (משפחת {recommended})**")
-
-with tab3:
     st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
     
     st.subheader("📥 סגירת שבוע ועדכון נסיעות")
@@ -310,23 +297,6 @@ with tab3:
                 st.error(f"❌ {msg}")
         else:
             st.info("ℹ️ לא נמצאו נהגים משובצים בשבוע הנוכחי. הסטטיסטיקה לא שונתה.")
-
-    st.markdown("---")
-    
-    with st.expander("⚙️ ניהול ואיפוס נתונים (מנהל מערכת)", expanded=False):
-        st.warning("⚠️ אזהרה: פעולה זו תאפס את ניקוד כל המשפחות ל-0 ב-Google Sheets. מומלץ לבצע רק בתחילת עונה/שנה חדשה.")
-        confirm_reset = st.checkbox("אני מאשר/ת שברצוני לאפס את ניקוד כל המשפחות ל-0")
-        if st.button("🗑️ אפס את כל הסטטיסטיקה ל-0"):
-            if confirm_reset:
-                zero_history = {fam: 0 for fam in FAMILIES_DB.keys()}
-                success, msg = save_history(zero_history)
-                if success:
-                    st.success("🎉 הסטטיסטיקה אופסה בהצלחה! כל המשפחות עודכנו ל-0 נסיעות.")
-                    st.rerun()
-                else:
-                    st.error(f"❌ {msg}")
-            else:
-                st.error("אנא סמן את תיבת האישור לפני הלחיצה על איפוס.")
 
     st.markdown("---")
     
