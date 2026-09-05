@@ -278,6 +278,13 @@ with tab1:
                 a_fam = None
                 a_driver_str = "⚠️ חסר נהג מתנדב!"
 
+            # החרגת הילדים שלא נוסעים מרשימת הנוסעים הסופית
+            active_passengers = [
+                info["child_name"] 
+                for k, info in FAMILIES_DB.items() 
+                if k not in data["absent_fams"]
+            ]
+
             results.append({
                 "יום": day, 
                 "is_holiday": False, 
@@ -285,7 +292,7 @@ with tab1:
                 "נהג בוקר": m_driver_str, 
                 "a_family_key": a_fam,
                 "נהג אחה\"צ": a_driver_str,
-                "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
+                "נוסעים": ", ".join(active_passengers) if active_passengers else "אין נוסעים", 
                 "מסלול": gmaps_link, 
                 "איסוף אחה\"צ": optimal_time, 
             })
@@ -334,9 +341,10 @@ with tab1:
                             "status": status_a
                         }
 
+                st.write(f"👦👧 **ילדים נוסעים:** {res['נוסעים']}")
+
             st.markdown("---")
         
-        # שמירת סטטוס האישורים ב-session_state לצורך סגירת השבוע
         st.session_state["weekly_confirmations"] = confirmations
 
 with tab2:
@@ -385,6 +393,23 @@ with tab3:
                     st.error(f"❌ {msg}")
             else:
                 st.info("ℹ️ לא סומנו נסיעות בסטטוס '✅ מאושר'. הסטטיסטיקה לא שונתה.")
+
+    st.markdown("---")
+    
+    with st.expander("⚙️ ניהול ואיפוס נתונים (מנהל מערכת)", expanded=False):
+        st.warning("⚠️ אזהרה: פעולה זו תאפס את ניקוד כל המשפחות ל-0 ב-Google Sheets. מומלץ לבצע רק בתחילת עונה/שנה חדשה.")
+        confirm_reset = st.checkbox("אני מאשר/ת שברצוני לאפס את ניקוד כל המשפחות ל-0")
+        if st.button("🗑️ אפס את כל הסטטיסטיקה ל-0"):
+            if confirm_reset:
+                zero_history = {fam: 0 for fam in FAMILIES_DB.keys()}
+                success, msg = save_history(zero_history)
+                if success:
+                    st.success("🎉 הסטטיסטיקה אופסה בהצלחה! כל המשפחות עודכנו ל-0 נסיעות.")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+            else:
+                st.error("אנא סמן את תיבת האישור לפני הלחיצה על איפוס.")
 
     st.markdown("---")
     
