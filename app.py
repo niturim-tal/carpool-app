@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from collections import Counter
 import urllib.parse
-import json
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="ניהול הסעות בית אריה - בן שמן", layout="wide")
 
@@ -16,16 +16,9 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    sec = st.secrets["gcp_service_account"]
-    
-    # טיפול במצב שבו Streamlit קורא את ה-JSON כטקסט מרובה שורות או كمילון
-    if isinstance(sec, str):
-        sec = json.loads(sec.strip())
-    elif not isinstance(sec, dict):
-        sec = dict(sec)
-        
+    # טעינת המילון הישירה מה-Secrets (TOML)
     creds = Credentials.from_service_account_info(
-        sec,
+        dict(st.secrets["gcp_service_account"]),
         scopes=scope
     )
     return gspread.authorize(creds)
@@ -85,13 +78,20 @@ def create_gmaps_link(origin, waypoints, destination):
         params["waypoints"] = "|".join(waypoints)
     return base_url + "&" + urllib.parse.urlencode(params)
 
+# חישוב תאריך יום ראשון הקרוב
+today = datetime.now()
+days_until_sunday = (6 - today.weekday()) % 7
+if days_until_sunday == 0 and today.weekday() != 6:
+    days_until_sunday = 7
+next_sunday = today + timedelta(days=days_until_sunday)
+default_week_str = next_sunday.strftime("%d/%m/%Y")
+
 st.title("🚗 ניהול הסעות - בית אריה לבן שמן")
 
 tab1, tab2, tab3 = st.tabs(["🗓️ השבוע שלי", "🔄 החלפות", "📊 סטטיסטיקה"])
 
 with tab1:
-    st.sidebar.header("⚙️ הגדרות שבועיות")
-    selected_week = st.sidebar.text_input("שבוע בתאריך:", "10/09/2026")
+    selected_week = st.text_input("📅 שבוע מתחיל בתאריך (יום ראשון):", value=default_week_str)
     
     schedule_data = {}
     for day in DAYS:
