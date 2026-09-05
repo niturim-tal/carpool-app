@@ -66,12 +66,10 @@ def save_history(history_data):
             hist_sheet = sh.worksheet("history")
         except:
             hist_sheet = sh.add_worksheet(title="history", rows="100", cols="2")
-            hist_sheet.append_row(["family_key", "count"])
             
         hist_sheet.clear()
-        hist_sheet.append_row(["family_key", "count"])
-        for fam, count in history_data.items():
-            hist_sheet.append_row([fam, count])
+        rows = [["family_key", "count"]] + [[fam, count] for fam, count in history_data.items()]
+        hist_sheet.update('A1', rows)
         st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ברמת המשפחה!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
@@ -93,11 +91,13 @@ def save_weekly_state(state_data):
             ws = sh.worksheet("weekly_state")
         except:
             ws = sh.add_worksheet(title="weekly_state", rows="10", cols="2")
-            ws.append_row(["week_id", "data_json"])
             
         ws.clear()
-        ws.append_row(["week_id", "data_json"])
-        ws.append_row(["current", json.dumps(state_data, ensure_ascii=False)])
+        rows = [
+            ["week_id", "data_json"],
+            ["current", json.dumps(state_data, ensure_ascii=False)]
+        ]
+        ws.update('A1', rows)
         st.cache_data.clear()
         st.success("הזמינות השבועית נשמרה בהצלחה ב-Google Sheets!")
     except Exception as e:
