@@ -60,7 +60,7 @@ def save_history(history_data):
         hist_sheet.append_row(["family_key", "count"])
         for fam, count in history_data.items():
             hist_sheet.append_row([fam, count])
-        st.success("הנתונים נשמרו בהצלחה ב-Google Sheets!")
+        st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ב-Google Sheets!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
 
@@ -75,29 +75,16 @@ def create_gmaps_link(origin, waypoints, destination):
     return base_url + "&" + urllib.parse.urlencode(params)
 
 def calculate_optimal_pickup_time(end_times, waits_dict):
-    """
-    מחשב את שעת האיסוף האידאלית לפי הכללים:
-    - כל הילדים / 3 ילדים מסיימים יחד -> שעת הסיום שלהם.
-    - פיצול של 2 ו-2 -> השעה המאוחרת יותר.
-    - כל מקרה אחר -> שעת הרוב או השעה המאוחרת.
-    """
     times_list = [t.strftime("%H:%M") for t in end_times.values()]
     counts = Counter(times_list)
     most_common = counts.most_common()
     
-    # מקרה 1: כולם או 3 מסיימים באותה שעה
     if most_common[0][1] >= 3:
         return most_common[0][0]
-    
-    # מקרה 2: פיצול של 2 ו-2 (שני זוגות)
     if len(most_common) >= 2 and most_common[0][1] == 2 and most_common[1][1] == 2:
         return max(most_common[0][0], most_common[1][0])
-    
-    # מקרה 3: אם יש זוג יחיד ו-2 בודדים (2, 1, 1)
     if most_common[0][1] == 2:
         return most_common[0][0]
-        
-    # מקרה 4: כל ילד מסיים בשעה שונה -> השעה המאוחרת ביותר
     return max(times_list)
 
 # חישוב תאריך יום ראשון הקרוב
@@ -141,9 +128,8 @@ with tab1:
             else:
                 schedule_data[day] = {"is_holiday": True}
 
-    if st.button("🧮 מחשב שיבוץ שבועי"):
+    if st.button("🧮 מחשב הצעה לשיבוץ שבועי"):
         history = load_history()
-        temp_counts = history.copy()
         results = []
 
         for day in DAYS:
@@ -153,32 +139,30 @@ with tab1:
                 results.append({"יום": day, "is_holiday": True})
                 continue
 
-            # שיבוץ נהג בוקר
-            m_candidates = sorted(data["avail_morn"], key=lambda x: temp_counts.get(x, 0))
+            # הצעה לנהג בוקר
+            m_candidates = sorted(data["avail_morn"], key=lambda x: history.get(x, 0))
             m_driver = m_candidates[0] if m_candidates else None
             
             if m_driver:
-                temp_counts[m_driver] = temp_counts.get(m_driver, 0) + 1
                 m_driver_str = f"{FAMILIES_DB[m_driver]['parent_name']} ({FAMILIES_DB[m_driver]['phone']})"
                 pickups = [FAMILIES_DB[k]["address"] for k in FAMILIES_DB.keys() if k != m_driver and k not in data["absent_fams"]]
                 gmaps_link = create_gmaps_link(FAMILIES_DB[m_driver]["address"], pickups, SCHOOL_ADDRESS)
             else:
                 m_driver_str, gmaps_link = "אין נהג פנוי!", "#"
 
-            # חישוב שעת איסוף אחה"צ לפי הלוגיקה החדשה
+            # חישוב שעת איסוף אחה"צ
             optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
             
-            # מציאת נהגים פנויים בשעת האיסוף שנבחרה
+            # הצעה לנהג אחה"צ
             a_candidates = [
                 k for k in data["avail_aft"] 
                 if data["end_times"][k].strftime("%H:%M") == optimal_time or 
                 (data["end_times"][k].strftime("%H:%M") < optimal_time and data["waits"][k])
             ]
-            a_candidates = sorted(a_candidates, key=lambda x: temp_counts.get(x, 0))
+            a_candidates = sorted(a_candidates, key=lambda x: history.get(x, 0))
             a_driver = a_candidates[0] if a_candidates else None
             
             if a_driver:
-                temp_counts[a_driver] = temp_counts.get(a_driver, 0) + 1
                 a_driver_str = f"{FAMILIES_DB[a_driver]['parent_name']} ({FAMILIES_DB[a_driver]['phone']})"
             else:
                 a_driver_str = "נדרש תיאום ידני"
@@ -186,29 +170,74 @@ with tab1:
             results.append({
                 "יום": day, 
                 "is_holiday": False, 
+                "m_driver_key": m_driver,
                 "נהג בוקר": m_driver_str, 
+                "a_driver_key": a_driver,
+                "נהג אחה\"צ": a_driver_str,
                 "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
                 "מסלול": gmaps_link, 
                 "איסוף אחה\"צ": optimal_time, 
-                "נהג אחה\"צ": a_driver_str
             })
 
         st.session_state["current_schedule"] = results
-        st.session_state["temp_counts"] = temp_counts
 
     if "current_schedule" in st.session_state:
-        st.subheader("📋 לוח ההסעות השבועי")
-        for res in st.session_state["current_schedule"]:
+        st.subheader("📋 הצעת שיבוץ שבועית ואישור סטטוסים")
+        
+        status_options = ["⏳ ממתין לאישור", "✅ מאושר", "❌ נדחה / נדרשת החלפה"]
+        confirmations = {}
+
+        for idx, res in enumerate(st.session_state["current_schedule"]):
+            day = res["יום"]
             if res.get("is_holiday"):
-                st.markdown(f"**יום {res['יום']}** | 🏖️ **יום חופש / חג - אין הסעות**")
+                st.markdown(f"**יום {day}** | 🏖️ **יום חופש / חג - אין הסעות**")
             else:
-                st.markdown(f"**יום {res['יום']}** | 🌅 בוקר: {res['נהג בוקר']} | 🌆 אחה\"צ ({res['איסוף אחה\"צ']}): {res['נהג אחה\"צ']}")
-                if res['מסלול'] != "#":
-                    st.markdown(f"[🗺️ ניווט מעודכן ב-Google Maps]({res['מסלול']})")
+                st.markdown(f"### יום {day}")
+                c_morn, c_aft = st.columns(2)
+                
+                with c_morn:
+                    st.write(f"🌅 **בוקר:** {res['נהג בוקר']}")
+                    if res["m_driver_key"]:
+                        status_m = st.selectbox(
+                            f"סטטוס אישור בוקר ({day}):", 
+                            status_options, 
+                            key=f"status_m_{day}"
+                        )
+                        confirmations[(day, "morn")] = {
+                            "driver_key": res["m_driver_key"], 
+                            "status": status_m
+                        }
+                    if res['מסלול'] != "#":
+                        st.markdown(f"[🗺️ ניווט ב-Google Maps]({res['מסלול']})")
+                
+                with c_aft:
+                    st.write(f"🌆 **אחה\"צ ({res['איסוף אחה\"צ']}):** {res['נהג אחה\"צ']}")
+                    if res["a_driver_key"]:
+                        status_a = st.selectbox(
+                            f"סטטוס אישור אחה\"צ ({day}):", 
+                            status_options, 
+                            key=f"status_a_{day}"
+                        )
+                        confirmations[(day, "aft")] = {
+                            "driver_key": res["a_driver_key"], 
+                            "status": status_a
+                        }
+
             st.markdown("---")
             
-        if st.button("💾 אישור ועדכון היסטוריה ב-Google Sheets"):
-            save_history(st.session_state["temp_counts"])
+        if st.button("💾 עדכון היסטוריה ב-Google Sheets (רק עבור נסיעות שאושרו)"):
+            history = load_history()
+            updated_counts = history.copy()
+            approved_count = 0
+            
+            for (d, shift), info in confirmations.items():
+                if info["status"] == "✅ מאושר" and info["driver_key"]:
+                    driver = info["driver_key"]
+                    updated_counts[driver] = updated_counts.get(driver, 0) + 1
+                    approved_count += 1
+            
+            save_history(updated_counts)
+            st.info(f"עודכנו {approved_count} נסיעות שאושרו בפועל!")
 
 with tab2:
     st.header("🔄 בקשת החלפה בנסיעה")
