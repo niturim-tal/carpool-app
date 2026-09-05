@@ -67,7 +67,7 @@ def save_history(history_data):
             
         hist_sheet.clear()
         rows = [["family_key", "count"]] + [[fam, count] for fam, count in history_data.items()]
-        hist_sheet.update(rows, 'A1')
+        hist_sheet.update(range_name='A1', values=rows)
         st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ברמת המשפחה!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
@@ -91,17 +91,15 @@ def save_weekly_state(state_data):
             
         json_str = json.dumps(state_data, ensure_ascii=False)
         
-        # כתיבה בטוחה ללא תלות בגרסת gspread
         ws.clear()
         ws.update_cell(1, 1, "week_id")
         ws.update_cell(1, 2, "data_json")
         ws.update_cell(2, 1, "current")
         ws.update_cell(2, 2, json_str)
         
-        st.cache_data.clear()
         return True, "הנתונים נשמרו בהצלחה ב-Google Sheets!"
     except Exception as e:
-        return False, f"שגיאה: {str(e)}\n{traceback.format_exc()}"
+        return False, f"שגיאה בעת שמירה: {str(e)}"
 
 SCHOOL_ADDRESS = "בית ספר בן שמן"
 DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי"]
@@ -145,38 +143,21 @@ with tab1:
         st.write("")
         st.write("")
         if st.button("🔄 רענן נתונים מהענן"):
-            st.cache_data.clear()
             st.rerun()
 
     saved_state = load_weekly_state()
 
-    schedule_data = {}
-    for day in DAYS:
-        day_state = saved_state.get(day, {})
-        with st.expander(f"📅 הזנת זמינות ליום {day}", expanded=(day == "ראשון")):
+    with st.form("weekly_schedule_form"):
+        schedule_data = {}
+        for day in DAYS:
+            day_state = saved_state.get(day, {})
+            st.markdown(f"### 📅 יום {day}")
             is_holiday = st.checkbox(f"🎉 יום חופש / חג (אין לימודים ביום {day})", value=day_state.get("is_holiday", False), key=f"{day}_holiday")
             
             if not is_holiday:
                 c1, c2 = st.columns(2)
+                
                 with c1:
-                    end_times, waits = {}, {}
-                    saved_ends = day_state.get("end_times", {})
-                    saved_waits = day_state.get("waits", {})
-                    
-                    for f_key, f_info in FAMILIES_DB.items():
-                        col_a, col_b = st.columns([2, 1])
-                        with col_a:
-                            saved_val = saved_ends.get(f_key, "15:00")
-                            try:
-                                default_time = datetime.strptime(saved_val, "%H:%M").time()
-                            except:
-                                default_time = pd.to_datetime("15:00").time()
-                                
-                            t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
-                            end_times[f_key] = t_val.strftime("%H:%M")
-                        with col_b:
-                            waits[f_key] = st.checkbox("ממתין/ה", value=saved_waits.get(f_key, True), key=f"{day}_{f_key}_wait")
-                with c2:
                     default_morn = day_state.get("avail_morn_idx", [])
                     default_aft = day_state.get("avail_aft_idx", [])
                     
@@ -195,10 +176,31 @@ with tab1:
                         key=f"{day}_aft"
                     )
                 
-                saved_absent = day_state.get("absent", [])
-                absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
-                absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
-                
+                with c2:
+                    saved_absent = day_state.get("absent", [])
+                    absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
+                    absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
+
+                # חלון מתקפל לשעות סיום - סגור כברירת מחדל (expanded=False)
+                with st.expander(f"⏰ עדכון שעות סיום והמתנה - יום {day}", expanded=False):
+                    end_times, waits = {}, {}
+                    saved_ends = day_state.get("end_times", {})
+                    saved_waits = day_state.get("waits", {})
+                    
+                    for f_key, f_info in FAMILIES_DB.items():
+                        col_a, col_b = st.columns([2, 1])
+                        with col_a:
+                            saved_val = saved_ends.get(f_key, "15:00")
+                            try:
+                                default_time = datetime.strptime(saved_val, "%H:%M").time()
+                            except:
+                                default_time = pd.to_datetime("15:00").time()
+                                
+                            t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
+                            end_times[f_key] = t_val.strftime("%H:%M")
+                        with col_b:
+                            waits[f_key] = st.checkbox("ממתין/ה", value=saved_waits.get(f_key, True), key=f"{day}_{f_key}_wait")
+
                 schedule_data[day] = {
                     "is_holiday": False, 
                     "end_times": end_times, 
@@ -210,8 +212,12 @@ with tab1:
                 }
             else:
                 schedule_data[day] = {"is_holiday": True}
+            
+            st.markdown("---")
 
-    if st.button("💾 שמור זמינות בענן וחשב שיבוץ"):
+        submit_button = st.form_submit_button("💾 שמור זמינות בענן וחשב שיבוץ")
+
+    if submit_button:
         clean_save = {}
         for day, data in schedule_data.items():
             if data.get("is_holiday"):
