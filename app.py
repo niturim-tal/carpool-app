@@ -69,7 +69,7 @@ def save_history(history_data):
             
         hist_sheet.clear()
         rows = [["family_key", "count"]] + [[fam, count] for fam, count in history_data.items()]
-        hist_sheet.update('A1', rows)
+        hist_sheet.update(range_name='A1', values=rows)
         st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ברמת המשפחה!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
@@ -92,16 +92,16 @@ def save_weekly_state(state_data):
         except:
             ws = sh.add_worksheet(title="weekly_state", rows="10", cols="2")
             
-        ws.clear()
+        json_str = json.dumps(state_data, ensure_ascii=False)
         rows = [
             ["week_id", "data_json"],
-            ["current", json.dumps(state_data, ensure_ascii=False)]
+            ["current", json_str]
         ]
-        ws.update('A1', rows)
+        ws.update(range_name='A1:B2', values=rows)
         st.cache_data.clear()
         st.success("הזמינות השבועית נשמרה בהצלחה ב-Google Sheets!")
     except Exception as e:
-        st.error(f"שגיאה בסנכרון הנתונים ל-Google Sheets: {e}")
+        st.error(f"שגיאה מפורטת בסנכרון הנתונים: {str(e)}")
 
 SCHOOL_ADDRESS = "בית ספר בן שמן"
 DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי"]
@@ -195,7 +195,7 @@ with tab1:
                 
                 schedule_data[day] = {
                     "is_holiday": False, 
-                    "end_times": {k: v.strftime("%H:%M") for k, v in end_times.items()}, 
+                    "end_times": {k: (v.strftime("%H:%M") if hasattr(v, "strftime") else str(v)) for k, v in end_times.items()}, 
                     "waits": waits, 
                     "avail_morn_idx": avail_morn_idx, 
                     "avail_aft_idx": avail_aft_idx, 
