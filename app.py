@@ -83,7 +83,7 @@ def load_weekly_state():
         records = ws.get_all_records()
         if records:
             return json.loads(records[0]["data_json"])
-    except:
+    except Exception as e:
         pass
     return {}
 
@@ -98,8 +98,10 @@ def save_weekly_state(state_data):
         ws.clear()
         ws.append_row(["week_id", "data_json"])
         ws.append_row(["current", json.dumps(state_data, ensure_ascii=False)])
+        st.cache_data.clear()
+        st.success("הזמינות השבועית נשמרה בהצלחה ב-Google Sheets!")
     except Exception as e:
-        st.error(f"שגיאה בסנכרון הנתונים: {e}")
+        st.error(f"שגיאה בסנכרון הנתונים ל-Google Sheets: {e}")
 
 SCHOOL_ADDRESS = "בית ספר בן שמן"
 DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי"]
@@ -143,6 +145,7 @@ with tab1:
         st.write("")
         st.write("")
         if st.button("🔄 רענן נתונים מהענן"):
+            st.cache_data.clear()
             st.rerun()
 
     saved_state = load_weekly_state()
@@ -315,7 +318,6 @@ with tab1:
                     approved_count += 1
             
             save_history(updated_counts)
-            st.info(f"עודכנו {approved_count} נסיעות שאושרו בפועל ברמת המשפחה!")
 
 with tab2:
     st.header("🔄 בקשת החלפה בנסיעה")
