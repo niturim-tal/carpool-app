@@ -15,22 +15,28 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
+    
+    sec = st.secrets["gcp_service_account"]
+    # המרה ממחרוזת טקסט למילון במידת הצורך
+    if isinstance(sec, str):
+        sec = json.loads(sec)
+        
     creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
+        sec,
         scopes=scope
     )
     return gspread.authorize(creds)
 
 try:
     gc = get_gspread_client()
-    # שינוי לשם הגיליון המדויק שלך ב-Google Drive
+    # שם הגיליון כפי שמופיע אצלך ב-Google Drive
     sh = gc.open("carpool_app") 
     worksheet = sh.sheet1
     
     # טעינת נתוני המשפחות מהגיליון
     records = worksheet.get_all_records()
     FAMILIES_DB = {
-        row["family_key"]: {
+        str(row["family_key"]): {
             "parent_name": row["parent_name"],
             "phone": str(row["phone"]),
             "child_name": row["child_name"],
@@ -46,7 +52,7 @@ def load_history():
     try:
         hist_sheet = sh.worksheet("history")
         hist_records = hist_sheet.get_all_records()
-        return {row["family_key"]: int(row["count"]) for row in hist_records}
+        return {str(row["family_key"]): int(row["count"]) for row in hist_records}
     except:
         return {fam: 0 for fam in FAMILIES_DB.keys()}
 
