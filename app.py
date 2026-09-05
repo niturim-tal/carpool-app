@@ -68,9 +68,9 @@ def save_history(history_data):
         hist_sheet.clear()
         rows = [["family_key", "count"]] + [[fam, count] for fam, count in history_data.items()]
         hist_sheet.update(range_name='A1', values=rows)
-        st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ברמת המשפחה!")
+        return True, "הסטטיסטיקה וההיסטוריה עודכנו בהצלחה ברמת המשפחה!"
     except Exception as e:
-        st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
+        return False, f"שגיאה בשמירת ההיסטוריה: {e}"
 
 def load_weekly_state():
     try:
@@ -181,7 +181,6 @@ with tab1:
                     absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
                     absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
 
-                # חלון מתקפל לשעות סיום - סגור כברירת מחדל (expanded=False)
                 with st.expander(f"⏰ עדכון שעות סיום והמתנה - יום {day}", expanded=False):
                     end_times, waits = {}, {}
                     saved_ends = day_state.get("end_times", {})
@@ -233,7 +232,6 @@ with tab1:
                 }
                 
         success, msg = save_weekly_state(clean_save)
-        
         if success:
             st.success("✅ " + msg)
         else:
@@ -337,19 +335,9 @@ with tab1:
                         }
 
             st.markdown("---")
-            
-        if st.button("💾 עדכון היסטוריה ב-Google Sheets (קרדיט נרשם למשפחה)"):
-            history = load_history()
-            updated_counts = history.copy()
-            approved_count = 0
-            
-            for (d, shift), info in confirmations.items():
-                if info["status"] == "✅ מאושר" and info["family_key"]:
-                    fam = info["family_key"]
-                    updated_counts[fam] = updated_counts.get(fam, 0) + 1
-                    approved_count += 1
-            
-            save_history(updated_counts)
+        
+        # שמירת סטטוס האישורים ב-session_state לצורך סגירת השבוע
+        st.session_state["weekly_confirmations"] = confirmations
 
 with tab2:
     st.header("🔄 בקשת החלפה בנסיעה")
@@ -370,6 +358,36 @@ with tab2:
 
 with tab3:
     st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
+    
+    st.subheader("📥 סגירת שבוע ועדכון נסיעות")
+    st.caption("לחץ על הכפתור למטה בסוף השבוע כדי לסכם את כל הנסיעות שאושרו ב-✅ ולהוסיף אותן למאזן הכללי ב-Google Sheets.")
+    
+    if st.button("📥 סיכום שבועי – סגירת שבוע ועדכון הסטטיסטיקה"):
+        confirmations = st.session_state.get("weekly_confirmations", {})
+        if not confirmations:
+            st.warning("⚠️ לא נמצאו נתוני נסיעות מאושרות מהשבוע הנוכחי. אנא ודא שחישבת שיבוץ בלשונית 'השבוע שלי'.")
+        else:
+            history = load_history()
+            updated_counts = history.copy()
+            approved_count = 0
+            
+            for (d, shift), info in confirmations.items():
+                if info["status"] == "✅ מאושר" and info["family_key"]:
+                    fam = info["family_key"]
+                    updated_counts[fam] = updated_counts.get(fam, 0) + 1
+                    approved_count += 1
+            
+            if approved_count > 0:
+                success, msg = save_history(updated_counts)
+                if success:
+                    st.success(f"🎉 השבוע נסגר בהצלחה! התווספו {approved_count} נסיעות מאושרות למאזן המשפחות.")
+                else:
+                    st.error(f"❌ {msg}")
+            else:
+                st.info("ℹ️ לא סומנו נסיעות בסטטוס '✅ מאושר'. הסטטיסטיקה לא שונתה.")
+
+    st.markdown("---")
+    
     history_data = load_history()
     df_hist = pd.DataFrame([{"משפחה": f"{'/'.join(FAMILIES_DB[k]['parents'])} ({k})", "סך נסיעות": v} for k, v in history_data.items()])
     
