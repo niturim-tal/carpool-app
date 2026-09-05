@@ -67,7 +67,7 @@ def save_history(history_data):
             
         hist_sheet.clear()
         rows = [["family_key", "count"]] + [[fam, count] for fam, count in history_data.items()]
-        hist_sheet.update(range_name='A1', values=rows)
+        hist_sheet.update(rows, 'A1')
         st.success("הנתונים שאושרו בלבד נשמרו בהצלחה ברמת המשפחה!")
     except Exception as e:
         st.error(f"שגיאה בשמירת ההיסטוריה: {e}")
@@ -84,7 +84,6 @@ def load_weekly_state():
 
 def save_weekly_state(state_data):
     try:
-        ws = None
         try:
             ws = sh.worksheet("weekly_state")
         except:
@@ -92,12 +91,15 @@ def save_weekly_state(state_data):
             
         json_str = json.dumps(state_data, ensure_ascii=False)
         
-        # עדכון באמצעות update המבטיח כתיבה ישירה
-        ws.update(range_name='A1:B2', values=[
-            ["week_id", "data_json"],
-            ["current", json_str]
-        ])
-        return True, "הנתונים נשמרו בהצלחה!"
+        # כתיבה בטוחה ללא תלות בגרסת gspread
+        ws.clear()
+        ws.update_cell(1, 1, "week_id")
+        ws.update_cell(1, 2, "data_json")
+        ws.update_cell(2, 1, "current")
+        ws.update_cell(2, 2, json_str)
+        
+        st.cache_data.clear()
+        return True, "הנתונים נשמרו בהצלחה ב-Google Sheets!"
     except Exception as e:
         return False, f"שגיאה: {str(e)}\n{traceback.format_exc()}"
 
@@ -143,6 +145,7 @@ with tab1:
         st.write("")
         st.write("")
         if st.button("🔄 רענן נתונים מהענן"):
+            st.cache_data.clear()
             st.rerun()
 
     saved_state = load_weekly_state()
