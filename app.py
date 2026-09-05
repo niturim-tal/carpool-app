@@ -75,9 +75,9 @@ def save_history(history_data):
 def load_weekly_state():
     try:
         ws = sh.worksheet("weekly_state")
-        val = ws.acell('B2').value
-        if val:
-            return json.loads(val)
+        records = ws.get_all_records()
+        if records:
+            return json.loads(records[0]["data_json"])
     except Exception as e:
         pass
     return {}
@@ -87,23 +87,19 @@ def save_weekly_state(state_data):
         ws = None
         try:
             ws = sh.worksheet("weekly_state")
-        except Exception as sheet_err:
-            st.info(f"מנסה ליצור לשונית weekly_state חדשה... ({sheet_err})")
+        except:
             ws = sh.add_worksheet(title="weekly_state", rows="10", cols="2")
             
         json_str = json.dumps(state_data, ensure_ascii=False)
         
-        ws.update_acell('A1', 'week_id')
-        ws.update_acell('B1', 'data_json')
-        ws.update_acell('A2', 'current')
-        ws.update_acell('B2', json_str)
-        
-        st.success("✅ הזמינות השבועית נשמרה בהצלחה ב-Google Sheets!")
-        return True
+        # עדכון באמצעות update המבטיח כתיבה ישירה
+        ws.update(range_name='A1:B2', values=[
+            ["week_id", "data_json"],
+            ["current", json_str]
+        ])
+        return True, "הנתונים נשמרו בהצלחה!"
     except Exception as e:
-        st.error(f"❌ שגיאה בעת כתיבה ל-Google Sheets: {str(e)}")
-        st.code(traceback.format_exc())
-        return False
+        return False, f"שגיאה: {str(e)}\n{traceback.format_exc()}"
 
 SCHOOL_ADDRESS = "בית ספר בן שמן"
 DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי"]
@@ -116,7 +112,7 @@ def create_gmaps_link(origin, waypoints, destination):
     return base_url + "&" + urllib.parse.urlencode(params)
 
 def calculate_optimal_pickup_time(end_times, waits_dict):
-    times_list = [t.strftime("%H:%M") if hasattr(t, 'strftime') else str(t) for t in end_times.values()]
+    times_list = [str(t) for t in end_times.values()]
     counts = Counter(times_list)
     most_common = counts.most_common()
     
@@ -167,8 +163,14 @@ with tab1:
                     for f_key, f_info in FAMILIES_DB.items():
                         col_a, col_b = st.columns([2, 1])
                         with col_a:
-                            default_time = pd.to_datetime(saved_ends.get(f_key, "15:00")).time()
-                            end_times[f_key] = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
+                            saved_val = saved_ends.get(f_key, "15:00")
+                            try:
+                                default_time = datetime.strptime(saved_val, "%H:%M").time()
+                            except:
+                                default_time = pd.to_datetime("15:00").time()
+                                
+                            t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
+                            end_times[f_key] = t_val.strftime("%H:%M")
                         with col_b:
                             waits[f_key] = st.checkbox("ממתין/ה", value=saved_waits.get(f_key, True), key=f"{day}_{f_key}_wait")
                 with c2:
@@ -196,7 +198,7 @@ with tab1:
                 
                 schedule_data[day] = {
                     "is_holiday": False, 
-                    "end_times": {k: (v.strftime("%H:%M") if hasattr(v, "strftime") else str(v)) for k, v in end_times.items()}, 
+                    "end_times": end_times, 
                     "waits": waits, 
                     "avail_morn_idx": avail_morn_idx, 
                     "avail_aft_idx": avail_aft_idx, 
@@ -221,63 +223,67 @@ with tab1:
                     "absent": data["absent"]
                 }
                 
-        saved_ok = save_weekly_state(clean_save)
+        success, msg = save_weekly_state(clean_save)
         
-        if saved_ok:
-            history = load_history()
-            results = []
+        if success:
+            st.success("✅ " + msg)
+        else:
+            st.error("❌ " + msg)
+            
+        history = load_history()
+        results = []
 
-            for day in DAYS:
-                data = schedule_data[day]
-                
-                if data["is_holiday"]:
-                    results.append({"יום": day, "is_holiday": True})
-                    continue
+        for day in DAYS:
+            data = schedule_data[day]
+            
+            if data["is_holiday"]:
+                results.append({"יום": day, "is_holiday": True})
+                continue
 
-                morn_drivers = [DRIVERS_LIST[i] for i in data["avail_morn_idx"]]
-                m_candidates = sorted(morn_drivers, key=lambda d: history.get(d["family_key"], 0))
-                m_driver_obj = m_candidates[0] if m_candidates else None
-                
-                if m_driver_obj:
-                    m_fam = m_driver_obj["family_key"]
-                    m_driver_str = f"{m_driver_obj['driver_name']} ({FAMILIES_DB[m_fam]['phone']})"
-                    pickups = [FAMILIES_DB[k]["address"] for k in FAMILIES_DB.keys() if k != m_fam and k not in data["absent_fams"]]
-                    gmaps_link = create_gmaps_link(FAMILIES_DB[m_fam]["address"], pickups, SCHOOL_ADDRESS)
-                else:
-                    m_fam = None
-                    m_driver_str, gmaps_link = "⚠️ חסר נהג מתנדב!", "#"
+            morn_drivers = [DRIVERS_LIST[i] for i in data["avail_morn_idx"]]
+            m_candidates = sorted(morn_drivers, key=lambda d: history.get(d["family_key"], 0))
+            m_driver_obj = m_candidates[0] if m_candidates else None
+            
+            if m_driver_obj:
+                m_fam = m_driver_obj["family_key"]
+                m_driver_str = f"{m_driver_obj['driver_name']} ({FAMILIES_DB[m_fam]['phone']})"
+                pickups = [FAMILIES_DB[k]["address"] for k in FAMILIES_DB.keys() if k != m_fam and k not in data["absent_fams"]]
+                gmaps_link = create_gmaps_link(FAMILIES_DB[m_fam]["address"], pickups, SCHOOL_ADDRESS)
+            else:
+                m_fam = None
+                m_driver_str, gmaps_link = "⚠️ חסר נהג מתנדב!", "#"
 
-                optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
-                
-                aft_drivers = [DRIVERS_LIST[i] for i in data["avail_aft_idx"]]
-                a_candidates = [
-                    d for d in aft_drivers 
-                    if data["end_times"][d["family_key"]] == optimal_time or 
-                    (data["end_times"][d["family_key"]] < optimal_time and data["waits"][d["family_key"]])
-                ]
-                a_candidates = sorted(a_candidates, key=lambda d: history.get(d["family_key"], 0))
-                a_driver_obj = a_candidates[0] if a_candidates else None
-                
-                if a_driver_obj:
-                    a_fam = a_driver_obj["family_key"]
-                    a_driver_str = f"{a_driver_obj['driver_name']} ({FAMILIES_DB[a_fam]['phone']})"
-                else:
-                    a_fam = None
-                    a_driver_str = "⚠️ חסר נהג מתנדב!"
+            optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
+            
+            aft_drivers = [DRIVERS_LIST[i] for i in data["avail_aft_idx"]]
+            a_candidates = [
+                d for d in aft_drivers 
+                if data["end_times"][d["family_key"]] == optimal_time or 
+                (data["end_times"][d["family_key"]] < optimal_time and data["waits"][d["family_key"]])
+            ]
+            a_candidates = sorted(a_candidates, key=lambda d: history.get(d["family_key"], 0))
+            a_driver_obj = a_candidates[0] if a_candidates else None
+            
+            if a_driver_obj:
+                a_fam = a_driver_obj["family_key"]
+                a_driver_str = f"{a_driver_obj['driver_name']} ({FAMILIES_DB[a_fam]['phone']})"
+            else:
+                a_fam = None
+                a_driver_str = "⚠️ חסר נהג מתנדב!"
 
-                results.append({
-                    "יום": day, 
-                    "is_holiday": False, 
-                    "m_family_key": m_fam,
-                    "נהג בוקר": m_driver_str, 
-                    "a_family_key": a_fam,
-                    "נהג אחה\"צ": a_driver_str,
-                    "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
-                    "מסלול": gmaps_link, 
-                    "איסוף אחה\"צ": optimal_time, 
-                })
+            results.append({
+                "יום": day, 
+                "is_holiday": False, 
+                "m_family_key": m_fam,
+                "נהג בוקר": m_driver_str, 
+                "a_family_key": a_fam,
+                "נהג אחה\"צ": a_driver_str,
+                "נוסעים": ", ".join([FAMILIES_DB[k]["child_name"] for k in FAMILIES_DB.keys() if k not in data["absent_fams"]]), 
+                "מסלול": gmaps_link, 
+                "איסוף אחה\"צ": optimal_time, 
+            })
 
-            st.session_state["current_schedule"] = results
+        st.session_state["current_schedule"] = results
 
     if "current_schedule" in st.session_state:
         st.subheader("📋 לוח הסעות שבועי סופי ואישור נהגים")
