@@ -17,9 +17,12 @@ def get_gspread_client():
     ]
     
     sec = st.secrets["gcp_service_account"]
-    # המרה ממחרוזת טקסט למילון במידת הצורך
+    
+    # טיפול במצב שבו Streamlit קורא את ה-JSON כטקסט מרובה שורות או كمילון
     if isinstance(sec, str):
-        sec = json.loads(sec)
+        sec = json.loads(sec.strip())
+    elif not isinstance(sec, dict):
+        sec = dict(sec)
         
     creds = Credentials.from_service_account_info(
         sec,
