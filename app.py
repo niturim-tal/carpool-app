@@ -104,7 +104,7 @@ with tab1:
     
     schedule_data = {}
     for day in DAYS:
-        with st.expander(f"📅 הגדרות ליום {day}", expanded=(day == "ראשון")):
+        with st.expander(f"📅 הזנת זמינות ליום {day}", expanded=(day == "ראשון")):
             is_holiday = st.checkbox(f"🎉 יום חופש / חג (אין לימודים ביום {day})", key=f"{day}_holiday")
             
             if not is_holiday:
@@ -118,8 +118,9 @@ with tab1:
                         with col_b:
                             waits[f_key] = st.checkbox("ממתין/ה", value=True, key=f"{day}_{f_key}_wait")
                 with c2:
-                    avail_morn = st.multiselect("פנויים לבוקר", list(FAMILIES_DB.keys()), default=list(FAMILIES_DB.keys()), key=f"{day}_morn")
-                    avail_aft = st.multiselect("פנויים לאחה\"צ", list(FAMILIES_DB.keys()), default=list(FAMILIES_DB.keys()), key=f"{day}_aft")
+                    # ברירת המחדל עכשיו ריקה ([] במקום רשימת כל המשפחות)
+                    avail_morn = st.multiselect("🙋‍♂️ מתנדבים לבוקר", list(FAMILIES_DB.keys()), default=[], key=f"{day}_morn")
+                    avail_aft = st.multiselect("🙋‍♂️ מתנדבים לאחה\"צ", list(FAMILIES_DB.keys()), default=[], key=f"{day}_aft")
                 
                 absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], key=f"{day}_absent")
                 absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
@@ -128,7 +129,7 @@ with tab1:
             else:
                 schedule_data[day] = {"is_holiday": True}
 
-    if st.button("🧮 מחשב הצעה לשיבוץ שבועי"):
+    if st.button("🧮 חישוב שיבוץ סופי מהמתנדבים"):
         history = load_history()
         results = []
 
@@ -139,7 +140,7 @@ with tab1:
                 results.append({"יום": day, "is_holiday": True})
                 continue
 
-            # הצעה לנהג בוקר
+            # בחירת נהג בוקר מתוך המתנדבים לפי מדד העומס
             m_candidates = sorted(data["avail_morn"], key=lambda x: history.get(x, 0))
             m_driver = m_candidates[0] if m_candidates else None
             
@@ -148,12 +149,12 @@ with tab1:
                 pickups = [FAMILIES_DB[k]["address"] for k in FAMILIES_DB.keys() if k != m_driver and k not in data["absent_fams"]]
                 gmaps_link = create_gmaps_link(FAMILIES_DB[m_driver]["address"], pickups, SCHOOL_ADDRESS)
             else:
-                m_driver_str, gmaps_link = "אין נהג פנוי!", "#"
+                m_driver_str, gmaps_link = "⚠️ חסר נהג מתנדב!", "#"
 
             # חישוב שעת איסוף אחה"צ
             optimal_time = calculate_optimal_pickup_time(data["end_times"], data["waits"])
             
-            # הצעה לנהג אחה"צ
+            # בחירת נהג אחה"צ מתוך המתנדבים הפנויים בשעה הנדרשת
             a_candidates = [
                 k for k in data["avail_aft"] 
                 if data["end_times"][k].strftime("%H:%M") == optimal_time or 
@@ -165,7 +166,7 @@ with tab1:
             if a_driver:
                 a_driver_str = f"{FAMILIES_DB[a_driver]['parent_name']} ({FAMILIES_DB[a_driver]['phone']})"
             else:
-                a_driver_str = "נדרש תיאום ידני"
+                a_driver_str = "⚠️ חסר נהג מתנדב!"
 
             results.append({
                 "יום": day, 
@@ -182,7 +183,7 @@ with tab1:
         st.session_state["current_schedule"] = results
 
     if "current_schedule" in st.session_state:
-        st.subheader("📋 הצעת שיבוץ שבועית ואישור סטטוסים")
+        st.subheader("📋 לוח הסעות שבועי סופי ואישור נהגים")
         
         status_options = ["⏳ ממתין לאישור", "✅ מאושר", "❌ נדחה / נדרשת החלפה"]
         confirmations = {}
@@ -199,7 +200,7 @@ with tab1:
                     st.write(f"🌅 **בוקר:** {res['נהג בוקר']}")
                     if res["m_driver_key"]:
                         status_m = st.selectbox(
-                            f"סטטוס אישור בוקר ({day}):", 
+                            f"אישור נהג בוקר ({day}):", 
                             status_options, 
                             key=f"status_m_{day}"
                         )
@@ -214,7 +215,7 @@ with tab1:
                     st.write(f"🌆 **אחה\"צ ({res['איסוף אחה\"צ']}):** {res['נהג אחה\"צ']}")
                     if res["a_driver_key"]:
                         status_a = st.selectbox(
-                            f"סטטוס אישור אחה\"צ ({day}):", 
+                            f"אישור נהג אחה\"צ ({day}):", 
                             status_options, 
                             key=f"status_a_{day}"
                         )
