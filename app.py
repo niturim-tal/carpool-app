@@ -35,11 +35,15 @@ try:
         parents_str = str(row["parent_name"])
         parents = [p.strip() for p in parents_str.replace('/', ',').replace(' ו-', ',').replace(' ו', ',').split(',')]
         
+        raw_address = str(row["address"])
+        addresses = [a.strip() for a in raw_address.split('/') if a.strip()]
+        
         FAMILIES_DB[f_key] = {
             "parents": parents,
             "phone": str(row["phone"]),
             "child_name": row["child_name"],
-            "address": row["address"]
+            "addresses": addresses,
+            "default_address": addresses[0] if addresses else ""
         }
         
         for p in parents:
@@ -195,13 +199,15 @@ with tab1:
                     absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
                     absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
 
-                with st.expander(f"⏰ עדכון שעות סיום והמתנה - יום {day}", expanded=False):
-                    end_times, waits = {}, {}
+                # חלון עדכון שעות סיום וכתובות איסוף
+                with st.expander(f"⏰ עדכון שעות סיום וכתובת איסוף - יום {day}", expanded=False):
+                    end_times = {}
+                    selected_addresses = {}
                     saved_ends = day_state.get("end_times", {})
-                    saved_waits = day_state.get("waits", {})
+                    saved_selected_addrs = day_state.get("selected_addresses", {})
                     
                     for f_key, f_info in FAMILIES_DB.items():
-                        col_a, col_b = st.columns([2, 1])
+                        col_a, col_b = st.columns([1, 2])
                         with col_a:
                             saved_val = saved_ends.get(f_key, "15:00")
                             try:
@@ -211,8 +217,23 @@ with tab1:
                                 
                             t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
                             end_times[f_key] = t_val.strftime("%H:%M")
+                            
                         with col_b:
-                            waits[f_key] = st.checkbox("ממתין/ה", value=saved_waits.get(f_key, True), key=f"{day}_{f_key}_wait")
+                            addrs = f_info["addresses"]
+                            if len(addrs) > 1:
+                                saved_addr = saved_selected_addrs.get(f_key, addrs[0])
+                                addr_idx = addrs.index(saved_addr) if saved_addr in addrs else 0
+                                chosen_addr = st.selectbox(
+                                    f"📍 כתובת איסוף עבור {f_info['child_name']}:", 
+                                    addrs, 
+                                    index=addr_idx, 
+                                    key=f"{day}_{f_key}_addr"
+                                )
+                                selected_addresses[f_key] = chosen_addr
+                            else:
+                                chosen_addr = f_info["default_address"]
+                                selected_addresses[f_key] = chosen_addr
+                                st.markdown(f"📍 **כתובת איסוף:** {chosen_addr}")
 
                 col_status_m, col_status_a = st.columns(2)
                 
@@ -223,8 +244,13 @@ with tab1:
                     else:
                         st.success(f"🌅 **בוקר:** {selected_morn_driver}")
                         if m_fam:
-                            pickups = [FAMILIES_DB[k]["address"] for k in FAMILIES_DB.keys() if k != m_fam and k not in absent_fams]
-                            gmaps_link = create_gmaps_link(FAMILIES_DB[m_fam]["address"], pickups, SCHOOL_ADDRESS)
+                            pickups = [
+                                selected_addresses.get(k, FAMILIES_DB[k]["default_address"]) 
+                                for k in FAMILIES_DB.keys() 
+                                if k != m_fam and k not in absent_fams
+                            ]
+                            driver_origin = selected_addresses.get(m_fam, FAMILIES_DB[m_fam]["default_address"])
+                            gmaps_link = create_gmaps_link(driver_origin, pickups, SCHOOL_ADDRESS)
                             st.markdown(f"[🗺️ ניווט ב-Google Maps]({gmaps_link})")
 
                 optimal_time = calculate_optimal_pickup_time(end_times)
@@ -244,7 +270,7 @@ with tab1:
                     "m_fam": m_fam,
                     "a_fam": get_family_key_from_driver_str(selected_aft_driver),
                     "end_times": end_times, 
-                    "waits": waits, 
+                    "selected_addresses": selected_addresses,
                     "absent": absent,
                     "absent_fams": absent_fams
                 }
