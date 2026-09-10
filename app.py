@@ -199,7 +199,6 @@ with tab1:
                     absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
                     absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
 
-                # חלון עדכון שעות סיום וכתובות איסוף
                 with st.expander(f"⏰ עדכון שעות סיום וכתובת איסוף - יום {day}", expanded=False):
                     end_times = {}
                     selected_addresses = {}
@@ -325,7 +324,19 @@ with tab2:
 
     st.markdown("---")
     
-    df_hist = pd.DataFrame([{"משפחה": f"{'/'.join(FAMILIES_DB[k]['parents'])} ({k})", "סך נסיעות": v} for k, v in history.items()])
+    hist_list = []
+    for k, v in history.items():
+        fam_info = FAMILIES_DB.get(k)
+        if fam_info:
+            label = f"{'/'.join(fam_info['parents'])} ({k})"
+        else:
+            label = f"משפחה {k}"
+        hist_list.append({"משפחה": label, "סך נסיעות": v})
+
+    df_hist = pd.DataFrame(hist_list)
     
-    st.bar_chart(df_hist.set_index("משפחה"))
-    st.table(df_hist)
+    if not df_hist.empty:
+        st.bar_chart(df_hist.set_index("משפחה"))
+        st.table(df_hist)
+    else:
+        st.info("אין נתוני היסטוריה להצגה.")
