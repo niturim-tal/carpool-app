@@ -136,7 +136,7 @@ if days_until_sunday == 0 and today.weekday() != 6:
 next_sunday = today + timedelta(days=days_until_sunday)
 default_week_str = next_sunday.strftime("%d/%m/%Y")
 
-st.title("🚗 ניהול הסעות - בית אריה לבן שמן")
+st.title("🚗 ניהול הסעות בית אריה - בן שמן")
 
 tab1, tab2 = st.tabs(["🗓️ השבוע שלי", "📊 סטטיסטיקה"])
 
@@ -300,7 +300,6 @@ with tab1:
                 else:
                     day_save_data = {"is_holiday": True}
 
-                # כפתור שמירה מודגש ייעודי לכל יום
                 submit_day = st.form_submit_button(f"💾 שמור זמינות ושיבוץ ליום {day}", type="primary")
                 
                 if submit_day:
@@ -346,10 +345,29 @@ with tab1:
 with tab2:
     st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
     
+    hist_list = []
+    for k, v in history.items():
+        fam_info = FAMILIES_DB.get(k)
+        if fam_info:
+            label = f"{'/'.join(fam_info['parents'])} ({k})"
+        else:
+            label = f"משפחה {k}"
+        hist_list.append({"משפחה": label, "סך נסיעות": v})
+
+    df_hist = pd.DataFrame(hist_list)
+    
+    if not df_hist.empty:
+        st.bar_chart(df_hist.set_index("משפחה"))
+        st.table(df_hist)
+    else:
+        st.info("אין נתוני היסטוריה להצגה.")
+
+    st.markdown("---")
+    
     st.subheader("📥 סגירת שבוע ועדכון נסיעות")
     st.caption("לחץ על הכפתור בסוף השבוע כדי לסכם את כל הנסיעות שבוצעו בפועל ולהוסיף אותן למאזן הכללי ב-Google Sheets.")
     
-    if st.button("📥 סיכום שבועי – סגירת שבוע ועדכון הסטטיסטיקה"):
+    if st.button("📥 סיכום שבועי – סגירת שבוע ועדכון הסטטיסטיקה", type="primary"):
         updated_counts = history.copy()
         approved_count = 0
         
@@ -375,22 +393,3 @@ with tab2:
                 st.error(f"❌ {msg}")
         else:
             st.info("ℹ️ לא נמצאו נהגים משובצים בשבוע הנוכחי. הסטטיסטיקה לא שונתה.")
-
-    st.markdown("---")
-    
-    hist_list = []
-    for k, v in history.items():
-        fam_info = FAMILIES_DB.get(k)
-        if fam_info:
-            label = f"{'/'.join(fam_info['parents'])} ({k})"
-        else:
-            label = f"משפחה {k}"
-        hist_list.append({"משפחה": label, "סך נסיעות": v})
-
-    df_hist = pd.DataFrame(hist_list)
-    
-    if not df_hist.empty:
-        st.bar_chart(df_hist.set_index("משפחה"))
-        st.table(df_hist)
-    else:
-        st.info("אין נתוני היסטוריה להצגה.")
