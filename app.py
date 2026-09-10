@@ -3,7 +3,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from collections import Counter
-import urllib.parse
 from datetime import datetime, timedelta
 import json
 
@@ -115,13 +114,6 @@ def save_weekly_state(state_data):
 SCHOOL_ADDRESS = "בית ספר בן שמן"
 DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי"]
 
-def create_gmaps_link(origin, waypoints, destination):
-    base_url = "https://www.google.com/maps/dir/?api=1"
-    params = {"origin": origin, "destination": destination, "travelmode": "driving"}
-    if waypoints:
-        params["waypoints"] = "|".join(waypoints)
-    return base_url + "&" + urllib.parse.urlencode(params)
-
 def calculate_optimal_pickup_time(end_times):
     times_list = [str(t) for t in end_times.values()]
     if not times_list:
@@ -152,142 +144,180 @@ saved_state = load_weekly_state()
 history = load_history()
 
 with tab1:
-    col_date, col_sync = st.columns([3, 1])
+    col_date, col_reset, col_sync = st.columns([2, 1, 1])
     with col_date:
         selected_week = st.text_input("📅 שבוע מתחיל בתאריך (יום ראשון):", value=default_week_str)
+    with col_reset:
+        st.write("")
+        st.write("")
+        if st.button("🧹 ניקוי שיבוצים לשבוע חדש"):
+            clean_state = {}
+            for day in DAYS:
+                clean_state[day] = {
+                    "is_holiday": False,
+                    "morn_driver": "— ללא נהג / חסר —",
+                    "aft_driver": "— ללא נהג / חסר —",
+                    "m_fam": None,
+                    "a_fam": None,
+                    "end_times": {k: "15:00" for k in FAMILIES_DB.keys()},
+                    "selected_addresses": {k: FAMILIES_DB[k]["default_address"] for k in FAMILIES_DB.keys()},
+                    "absent": [],
+                    "absent_fams": []
+                }
+            success, msg = save_weekly_state(clean_state)
+            if success:
+                st.success("🎉 השיבוצים נוקו בהצלחה לקראת שבוע חדש!")
+                st.rerun()
+            else:
+                st.error("❌ " + msg)
+
     with col_sync:
         st.write("")
         st.write("")
         if st.button("🔄 רענן נתונים מהענן"):
             st.rerun()
 
-    with st.form("weekly_schedule_form"):
-        schedule_data = {}
-        for day in DAYS:
-            day_state = saved_state.get(day, {})
-            st.markdown(f"## 📅 יום {day}")
-            is_holiday = st.checkbox(f"🎉 יום חופש / חג (אין לימודים ביום {day})", value=day_state.get("is_holiday", False), key=f"{day}_holiday")
-            
-            if not is_holiday:
-                c1, c2 = st.columns(2)
-                
-                saved_morn_driver = day_state.get("morn_driver")
-                if not saved_morn_driver:
-                    m_idxs = day_state.get("avail_morn_idx", [])
-                    if m_idxs and (m_idxs[0] + 1) < len(DRIVERS_LIST):
-                        saved_morn_driver = DRIVERS_LIST[m_idxs[0] + 1]
-                    else:
-                        saved_morn_driver = "— ללא נהג / חסר —"
+    st.markdown("---")
+    st.header("📋 תמונת מצב שבועית - נסיעות ולוח סופי")
 
-                saved_aft_driver = day_state.get("aft_driver")
-                if not saved_aft_driver:
-                    a_idxs = day_state.get("avail_aft_idx", [])
-                    if a_idxs and (a_idxs[0] + 1) < len(DRIVERS_LIST):
-                        saved_aft_driver = DRIVERS_LIST[a_idxs[0] + 1]
-                    else:
-                        saved_aft_driver = "— ללא נהג / חסר —"
+    # חלק עליון: תצוגה מרוכזת וברורה של השיבוצים
+    for day in DAYS:
+        day_state = saved_state.get(day, {})
+        is_holiday = day_state.get("is_holiday", False)
+        st.markdown(f"### 📅 יום {day}")
 
-                with c1:
-                    morn_idx = DRIVERS_LIST.index(saved_morn_driver) if saved_morn_driver in DRIVERS_LIST else 0
-                    selected_morn_driver = st.selectbox("🌅 נהג/ת לבוקר:", DRIVERS_LIST, index=morn_idx, key=f"{day}_morn")
-                    
-                    aft_idx = DRIVERS_LIST.index(saved_aft_driver) if saved_aft_driver in DRIVERS_LIST else 0
-                    selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
-
-                with c2:
-                    saved_absent = day_state.get("absent", [])
-                    absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
-                    absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
-
-                with st.expander(f"⏰ עדכון שעות סיום וכתובת איסוף - יום {day}", expanded=False):
-                    end_times = {}
-                    selected_addresses = {}
-                    saved_ends = day_state.get("end_times", {})
-                    saved_selected_addrs = day_state.get("selected_addresses", {})
-                    
-                    for f_key, f_info in FAMILIES_DB.items():
-                        col_a, col_b = st.columns([1, 2])
-                        with col_a:
-                            saved_val = saved_ends.get(f_key, "15:00")
-                            try:
-                                default_time = datetime.strptime(saved_val, "%H:%M").time()
-                            except:
-                                default_time = pd.to_datetime("15:00").time()
-                                
-                            t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
-                            end_times[f_key] = t_val.strftime("%H:%M")
-                            
-                        with col_b:
-                            addrs = f_info["addresses"]
-                            if len(addrs) > 1:
-                                saved_addr = saved_selected_addrs.get(f_key, addrs[0])
-                                addr_idx = addrs.index(saved_addr) if saved_addr in addrs else 0
-                                chosen_addr = st.selectbox(
-                                    f"📍 כתובת איסוף עבור {f_info['child_name']}:", 
-                                    addrs, 
-                                    index=addr_idx, 
-                                    key=f"{day}_{f_key}_addr"
-                                )
-                                selected_addresses[f_key] = chosen_addr
-                            else:
-                                chosen_addr = f_info["default_address"]
-                                selected_addresses[f_key] = chosen_addr
-                                st.markdown(f"📍 **כתובת איסוף:** {chosen_addr}")
-
-                col_status_m, col_status_a = st.columns(2)
-                
-                m_fam = get_family_key_from_driver_str(selected_morn_driver)
-                with col_status_m:
-                    if selected_morn_driver == "— ללא נהג / חסר —":
-                        st.warning("🌅 **בוקר:** ⚠️ חסר נהג מתנדב!")
-                    else:
-                        st.success(f"🌅 **בוקר:** {selected_morn_driver}")
-                        if m_fam:
-                            pickups = [
-                                selected_addresses.get(k, FAMILIES_DB[k]["default_address"]) 
-                                for k in FAMILIES_DB.keys() 
-                                if k != m_fam and k not in absent_fams
-                            ]
-                            driver_origin = selected_addresses.get(m_fam, FAMILIES_DB[m_fam]["default_address"])
-                            gmaps_link = create_gmaps_link(driver_origin, pickups, SCHOOL_ADDRESS)
-                            st.markdown(f"[🗺️ ניווט ב-Google Maps]({gmaps_link})")
-
-                optimal_time = calculate_optimal_pickup_time(end_times)
-                with col_status_a:
-                    if selected_aft_driver == "— ללא נהג / חסר —":
-                        st.warning(f"🌆 **אחה\"צ ({optimal_time}):** ⚠️ חסר נהג מתנדב!")
-                    else:
-                        st.success(f"🌆 **אחה\"צ ({optimal_time}):** {selected_aft_driver}")
-
-                active_passengers = [info["child_name"] for k, info in FAMILIES_DB.items() if k not in absent_fams]
-                st.caption(f"👦👧 **ילדים נוסעים בבוקר:** {', '.join(active_passengers) if active_passengers else 'אין נוסעים'}")
-
-                schedule_data[day] = {
-                    "is_holiday": False, 
-                    "morn_driver": selected_morn_driver,
-                    "aft_driver": selected_aft_driver,
-                    "m_fam": m_fam,
-                    "a_fam": get_family_key_from_driver_str(selected_aft_driver),
-                    "end_times": end_times, 
-                    "selected_addresses": selected_addresses,
-                    "absent": absent,
-                    "absent_fams": absent_fams
-                }
-            else:
-                st.info(f"🎉 **יום {day}:** יום חופש / חג - אין הסעות")
-                schedule_data[day] = {"is_holiday": True}
-            
-            st.markdown("---")
-
-        submit_button = st.form_submit_button("💾 שמור זמינות ושיבוץ בענן")
-
-    if submit_button:
-        success, msg = save_weekly_state(schedule_data)
-        if success:
-            st.success("✅ " + msg)
-            st.rerun()
+        if is_holiday:
+            st.info("🎉 יום חופש / חג - אין הסעות")
         else:
-            st.error("❌ " + msg)
+            saved_morn_driver = day_state.get("morn_driver", "— ללא נהג / חסר —")
+            saved_aft_driver = day_state.get("aft_driver", "— ללא נהג / חסר —")
+            absent_fams = day_state.get("absent_fams", [])
+            end_times = day_state.get("end_times", {})
+
+            col_status_m, col_status_a = st.columns(2)
+            
+            with col_status_m:
+                if saved_morn_driver == "— ללא נהג / חסר —":
+                    st.warning("🌅 **בוקר:** ⚠️ חסר נהג מתנדב!")
+                else:
+                    st.success(f"🌅 **בוקר:** {saved_morn_driver}")
+
+            optimal_time = calculate_optimal_pickup_time(end_times)
+            with col_status_a:
+                if saved_aft_driver == "— ללא נהג / חסר —":
+                    st.warning(f"🌆 **אחה\"צ ({optimal_time}):** ⚠️ חסר נהג מתנדב!")
+                else:
+                    st.success(f"🌆 **אחה\"צ ({optimal_time}):** {saved_aft_driver}")
+
+            active_passengers = [info["child_name"] for k, info in FAMILIES_DB.items() if k not in absent_fams]
+            st.caption(f"👦👧 **ילדים נוסעים בבוקר:** {', '.join(active_passengers) if active_passengers else 'אין נוסעים'}")
+
+        st.markdown("---")
+
+    # חלק תחתון: טופס עריכה ועדכון
+    with st.expander("⚙️ עדכון שיבוצים, שעות והחרגות (לחץ לפתיחה/עריכה)", expanded=True):
+        with st.form("weekly_schedule_form"):
+            schedule_data = {}
+            for day in DAYS:
+                day_state = saved_state.get(day, {})
+                st.markdown(f"### 📅 עריכת יום {day}")
+                is_holiday = st.checkbox(f"🎉 יום חופש / חג (אין לימודים ביום {day})", value=day_state.get("is_holiday", False), key=f"{day}_holiday")
+                
+                if not is_holiday:
+                    c1, c2 = st.columns(2)
+                    
+                    saved_morn_driver = day_state.get("morn_driver")
+                    if not saved_morn_driver:
+                        m_idxs = day_state.get("avail_morn_idx", [])
+                        if m_idxs and (m_idxs[0] + 1) < len(DRIVERS_LIST):
+                            saved_morn_driver = DRIVERS_LIST[m_idxs[0] + 1]
+                        else:
+                            saved_morn_driver = "— ללא נהג / חסר —"
+
+                    saved_aft_driver = day_state.get("aft_driver")
+                    if not saved_aft_driver:
+                        a_idxs = day_state.get("avail_aft_idx", [])
+                        if a_idxs and (a_idxs[0] + 1) < len(DRIVERS_LIST):
+                            saved_aft_driver = DRIVERS_LIST[a_idxs[0] + 1]
+                        else:
+                            saved_aft_driver = "— ללא נהג / חסר —"
+
+                    with c1:
+                        morn_idx = DRIVERS_LIST.index(saved_morn_driver) if saved_morn_driver in DRIVERS_LIST else 0
+                        selected_morn_driver = st.selectbox("🌅 נהג/ת לבוקר:", DRIVERS_LIST, index=morn_idx, key=f"{day}_morn")
+                        
+                        aft_idx = DRIVERS_LIST.index(saved_aft_driver) if saved_aft_driver in DRIVERS_LIST else 0
+                        selected_aft_driver = st.selectbox("🌆 נהג/ת לאחה\"צ:", DRIVERS_LIST, index=aft_idx, key=f"{day}_aft")
+
+                    with c2:
+                        saved_absent = day_state.get("absent", [])
+                        absent = st.multiselect("🚨 החרגות בוקר (ילדים שלא נוסעים):", [f"{info['child_name']} ({k})" for k, info in FAMILIES_DB.items()], default=saved_absent, key=f"{day}_absent")
+                        absent_fams = [k for k, info in FAMILIES_DB.items() if f"{info['child_name']} ({k})" in absent]
+
+                    # חלון עדכון שעות סיום וכתובות איסוף
+                    with st.expander(f"⏰ עדכון שעות סיום וכתובת איסוף - יום {day}", expanded=False):
+                        end_times = {}
+                        selected_addresses = {}
+                        saved_ends = day_state.get("end_times", {})
+                        saved_selected_addrs = day_state.get("selected_addresses", {})
+                        
+                        for f_key, f_info in FAMILIES_DB.items():
+                            col_a, col_b = st.columns([1, 2])
+                            with col_a:
+                                saved_val = saved_ends.get(f_key, "15:00")
+                                try:
+                                    default_time = datetime.strptime(saved_val, "%H:%M").time()
+                                except:
+                                    default_time = pd.to_datetime("15:00").time()
+                                    
+                                t_val = st.time_input(f"סיום {f_info['child_name']}", value=default_time, key=f"{day}_{f_key}_end")
+                                end_times[f_key] = t_val.strftime("%H:%M")
+                                
+                            with col_b:
+                                addrs = f_info["addresses"]
+                                if len(addrs) > 1:
+                                    saved_addr = saved_selected_addrs.get(f_key, addrs[0])
+                                    addr_idx = addrs.index(saved_addr) if saved_addr in addrs else 0
+                                    chosen_addr = st.selectbox(
+                                        f"📍 כתובת איסוף עבור {f_info['child_name']}:", 
+                                        addrs, 
+                                        index=addr_idx, 
+                                        key=f"{day}_{f_key}_addr"
+                                    )
+                                    selected_addresses[f_key] = chosen_addr
+                                else:
+                                    chosen_addr = f_info["default_address"]
+                                    selected_addresses[f_key] = chosen_addr
+                                    st.markdown(f"📍 **כתובת איסוף:** {chosen_addr}")
+
+                    m_fam = get_family_key_from_driver_str(selected_morn_driver)
+                    a_fam = get_family_key_from_driver_str(selected_aft_driver)
+
+                    schedule_data[day] = {
+                        "is_holiday": False, 
+                        "morn_driver": selected_morn_driver,
+                        "aft_driver": selected_aft_driver,
+                        "m_fam": m_fam,
+                        "a_fam": a_fam,
+                        "end_times": end_times, 
+                        "selected_addresses": selected_addresses,
+                        "absent": absent,
+                        "absent_fams": absent_fams
+                    }
+                else:
+                    schedule_data[day] = {"is_holiday": True}
+                
+                st.markdown("---")
+
+            submit_button = st.form_submit_button("💾 שמור זמינות ושיבוץ בענן")
+
+        if submit_button:
+            success, msg = save_weekly_state(schedule_data)
+            if success:
+                st.success("✅ " + msg)
+                st.rerun()
+            else:
+                st.error("❌ " + msg)
 
 with tab2:
     st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
