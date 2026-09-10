@@ -144,33 +144,9 @@ saved_state = load_weekly_state()
 history = load_history()
 
 with tab1:
-    col_date, col_reset, col_sync = st.columns([2, 1, 1])
+    col_date, col_sync = st.columns([3, 1])
     with col_date:
         selected_week = st.text_input("📅 שבוע מתחיל בתאריך (יום ראשון):", value=default_week_str)
-    with col_reset:
-        st.write("")
-        st.write("")
-        if st.button("🧹 ניקוי שיבוצים לשבוע חדש"):
-            clean_state = {}
-            for day in DAYS:
-                clean_state[day] = {
-                    "is_holiday": False,
-                    "morn_driver": "— ללא נהג / חסר —",
-                    "aft_driver": "— ללא נהג / חסר —",
-                    "m_fam": None,
-                    "a_fam": None,
-                    "end_times": {k: "15:00" for k in FAMILIES_DB.keys()},
-                    "selected_addresses": {k: FAMILIES_DB[k]["default_address"] for k in FAMILIES_DB.keys()},
-                    "absent": [],
-                    "absent_fams": []
-                }
-            success, msg = save_weekly_state(clean_state)
-            if success:
-                st.success("🎉 השיבוצים נוקו בהצלחה לקראת שבוע חדש!")
-                st.rerun()
-            else:
-                st.error("❌ " + msg)
-
     with col_sync:
         st.write("")
         st.write("")
@@ -180,11 +156,21 @@ with tab1:
     st.markdown("---")
     st.header("📋 תמונת מצב שבועית - נסיעות ולוח סופי")
 
-    # חלק עליון: תצוגה מרוכזת וברורה של השיבוצים
+    # חלק עליון: תצוגה מרוכזת וברורה של השיבוצים כולל אייקוני עריכה
     for day in DAYS:
         day_state = saved_state.get(day, {})
         is_holiday = day_state.get("is_holiday", False)
-        st.markdown(f"### 📅 יום {day}")
+        
+        col_day_title, col_edit_btn = st.columns([5, 1])
+        with col_day_title:
+            st.markdown(f"### 📅 יום {day}")
+        with col_edit_btn:
+            if st.button(f"✏️ ערוך יום {day}", key=f"scroll_to_{day}"):
+                st.session_state["edit_expander_open"] = True
+                st.components.v1.html(
+                    f"<script>window.parent.document.getElementById('edit_section_{day}').scrollIntoView({{behavior: 'smooth'}});</script>",
+                    height=0
+                )
 
         if is_holiday:
             st.info("🎉 יום חופש / חג - אין הסעות")
@@ -192,6 +178,7 @@ with tab1:
             saved_morn_driver = day_state.get("morn_driver", "— ללא נהג / חסר —")
             saved_aft_driver = day_state.get("aft_driver", "— ללא נהג / חסר —")
             absent_fams = day_state.get("absent_fams", [])
+            absent_children = day_state.get("absent", [])
             end_times = day_state.get("end_times", {})
 
             col_status_m, col_status_a = st.columns(2)
@@ -211,14 +198,20 @@ with tab1:
 
             active_passengers = [info["child_name"] for k, info in FAMILIES_DB.items() if k not in absent_fams]
             st.caption(f"👦👧 **ילדים נוסעים בבוקר:** {', '.join(active_passengers) if active_passengers else 'אין נוסעים'}")
+            if absent_children:
+                st.caption(f"🚨 **החרגות בוקר:** {', '.join(absent_children)}")
 
         st.markdown("---")
 
     # חלק תחתון: טופס עריכה ועדכון
-    with st.expander("⚙️ עדכון שיבוצים, שעות והחרגות (לחץ לפתיחה/עריכה)", expanded=True):
-        with st.form("weekly_schedule_form"):
-            schedule_data = {}
-            for day in DAYS:
+    expander_open = st.session_state.get("edit_expander_open", True)
+    with st.expander("⚙️ עדכון שיבוצים, שעות והחרגות (לחץ לפתיחה/עריכה)", expanded=expander_open):
+        schedule_data = saved_state.copy()
+        
+        for day in DAYS:
+            st.markdown(f"<div id='edit_section_{day}'></div>", unsafe_allow_html=True)
+            
+            with st.form(key=f"form_day_{day}"):
                 day_state = saved_state.get(day, {})
                 st.markdown(f"### 📅 עריכת יום {day}")
                 is_holiday = st.checkbox(f"🎉 יום חופש / חג (אין לימודים ביום {day})", value=day_state.get("is_holiday", False), key=f"{day}_holiday")
@@ -293,7 +286,7 @@ with tab1:
                     m_fam = get_family_key_from_driver_str(selected_morn_driver)
                     a_fam = get_family_key_from_driver_str(selected_aft_driver)
 
-                    schedule_data[day] = {
+                    day_save_data = {
                         "is_holiday": False, 
                         "morn_driver": selected_morn_driver,
                         "aft_driver": selected_aft_driver,
@@ -305,19 +298,50 @@ with tab1:
                         "absent_fams": absent_fams
                     }
                 else:
-                    schedule_data[day] = {"is_holiday": True}
+                    day_save_data = {"is_holiday": True}
+
+                # כפתור שמירה מודגש ייעודי לכל יום
+                submit_day = st.form_submit_button(f"💾 שמור זמינות ושיבוץ ליום {day}", type="primary")
                 
-                st.markdown("---")
+                if submit_day:
+                    schedule_data[day] = day_save_data
+                    success, msg = save_weekly_state(schedule_data)
+                    if success:
+                        st.success(f"✅ השיבוץ ליום {day} נשמר בהצלחה בענן!")
+                        st.rerun()
+                    else:
+                        st.error("❌ " + msg)
 
-            submit_button = st.form_submit_button("💾 שמור זמינות ושיבוץ בענן")
+            st.markdown("---")
 
-        if submit_button:
-            success, msg = save_weekly_state(schedule_data)
-            if success:
-                st.success("✅ " + msg)
-                st.rerun()
+    # כפתור ניקוי שיבוצים מוגן בתחתית העמוד
+    st.markdown("---")
+    with st.expander("🧹 ניקוי שיבוצים לשבוע חדש (אזור ניהול)", expanded=False):
+        st.caption("לחץ כאן כדי לאפס את כל הנהגים והשיבוצים לקראת פתיחת שבוע חדש.")
+        confirm_clean = st.checkbox("אני מאשר/ת איפוס שיבוצים לשבוע חדש")
+        if st.button("🧹 נקה את כל השיבוצים השבועיים"):
+            if confirm_clean:
+                clean_state = {}
+                for day in DAYS:
+                    clean_state[day] = {
+                        "is_holiday": False,
+                        "morn_driver": "— ללא נהג / חסר —",
+                        "aft_driver": "— ללא נהג / חסר —",
+                        "m_fam": None,
+                        "a_fam": None,
+                        "end_times": {k: "15:00" for k in FAMILIES_DB.keys()},
+                        "selected_addresses": {k: FAMILIES_DB[k]["default_address"] for k in FAMILIES_DB.keys()},
+                        "absent": [],
+                        "absent_fams": []
+                    }
+                success, msg = save_weekly_state(clean_state)
+                if success:
+                    st.success("🎉 השיבוצים נוקו בהצלחה לקראת שבוע חדש!")
+                    st.rerun()
+                else:
+                    st.error("❌ " + msg)
             else:
-                st.error("❌ " + msg)
+                st.error("אנא סמן את תיבת האישור לפני בלחיצה על ניקוי.")
 
 with tab2:
     st.header("📊 סטטיסטיקת נסיעות מצטברת לפי משפחה")
